@@ -3,9 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <signal.h>
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
@@ -112,9 +109,33 @@ void searchPathAndExecute(char *command, char *args[]) {
 
 //HISTORY
 void add_to_history(const char *command) {
-    snprintf(history[historyCount % HISTORY_SIZE], MAX_LINE, "%s", command);
-    historyCount++;
+    // Check if the command is already in history
+    int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
+    for (int i = start; i < historyCount; i++) {
+        if (strcmp(history[i % HISTORY_SIZE], command) == 0) {
+            // Remove the duplicate by shifting all commands after it
+            for (int j = i; j < historyCount - 1; j++) {
+                snprintf(history[j % HISTORY_SIZE], MAX_LINE, "%s", history[(j + 1) % HISTORY_SIZE]);
+            }
+            historyCount--; // Decrement history count to reflect removal
+            break;
+        }
+    }
+
+    // Shift all commands in history to make space for the new command at index 0
+    for (int i = HISTORY_SIZE - 1; i > 0; i--) {
+        snprintf(history[i], MAX_LINE, "%s", history[i - 1]);
+    }
+
+    // Add the new command at index 0
+    snprintf(history[0], MAX_LINE, "%s", command);
+
+    // If historyCount is less than HISTORY_SIZE, increment it
+    if (historyCount < HISTORY_SIZE) {
+        historyCount++;
+    }
 }
+
 
 void print_history() {
     int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
@@ -131,19 +152,31 @@ void execute_history_command(int index, char *args[]) {
     }
     char *command = history[(start + index) % HISTORY_SIZE];
     printf("Executing: %s\n", command);
-    // Reparse and execute the command
-    setup(command, args, &(int){0});
+
+    // Parse the command into args
+    char *parsedArgs[MAX_LINE / 2 + 1]; // Parsed arguments
+    char *token = strtok(command, " ");
+    int argCount = 0;
+    while (token != NULL) {
+        parsedArgs[argCount++] = token;
+        token = strtok(NULL, " ");
+    }
+    parsedArgs[argCount] = NULL;
+
+    // Execute the parsed command
     pid_t pid = fork();
     if (pid == 0) {
-        searchPathAndExecute(args[0], args);
-    } else {
+        searchPathAndExecute(parsedArgs[0], parsedArgs);
+    } else if (pid > 0) {
         waitpid(pid, NULL, 0);
+    } else {
+        perror("Fork failed");
     }
 }
+
 pid_t foregroundPid = 0;
 
-
-
+///////
 void handle_sigint(int sig) {
     if (foregroundPid > 0) {
         kill(-foregroundPid, SIGTERM); // Send SIGTERM to process group
@@ -267,6 +300,7 @@ int main(void) {
     while (1) {
         printf("myshell: ");
         background = 0;
+        fflush(stdout);
         setup(inputBuffer, args, &background);
 
         // Built-in commands
