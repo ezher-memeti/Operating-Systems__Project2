@@ -4,9 +4,14 @@
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
 #include <string.h>
+#include <sys/file.h>
+
 #define HISTORY_SIZE 10
 #define MAX_BG_PROCESSES 10
 
@@ -262,18 +267,48 @@ void handle_exit() {
     }
 }
 
+/////REDIRECTION
+// Handle I/O redirection
+void handle_redirection(char *args[], char **inputFile, char **outputFile, char **errorFile, int *appendOutput) {
+    *inputFile = NULL;
+    *outputFile = NULL;
+    *errorFile = NULL;
+    *appendOutput = 0;
+
+    for (int i = 0; args[i] != NULL; i++) {
+        if (strcmp(args[i], "<") == 0) {
+            *inputFile = args[i + 1];
+            args[i] = NULL; // Terminate args before redirection
+        } else if (strcmp(args[i], ">") == 0) {
+            *outputFile = args[i + 1];
+            *appendOutput = 0;
+            args[i] = NULL;
+        } else if (strcmp(args[i], ">>") == 0) {
+            *outputFile = args[i + 1];
+            *appendOutput = 1;
+            args[i] = NULL;
+        } else if (strcmp(args[i], "2>") == 0) {
+            *errorFile = args[i + 1];
+            args[i] = NULL;
+        }
+    }
+}
+
 
 int main(void) {
     char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
     int background;             /* equals 1 if a command is followed by '&' */
     char *args[MAX_LINE / 2 + 1]; /* command line arguments */
     signal(SIGTSTP, handle_sigint); // Handle ^Z
+    char *inputFile, *outputFile, *errorFile;
+    int appendOutput;
 
     while (1) {
         background = 0;
         printf("myshell: ");
         fflush(stdout);
         setup(inputBuffer, args, &background);
+        handle_redirection(args, &inputFile, &outputFile, &errorFile, &appendOutput);
 
         // Built-in commands
         if (args[0] == NULL) continue; // Ignore empty input
@@ -313,12 +348,41 @@ int main(void) {
         pid_t pid = fork();
         if (pid < 0) {
             perror("Failed to fork");
-        } else if (pid == 0) {
-            // Child process: execute command
+        } else if (pid == 0) { // Child process
+            // Handle I/O redirection
+            if (inputFile) {
+                int in = open(inputFile, O_RDONLY);
+                if (in < 0) {
+                    perror("Error opening input file");
+                    exit(1);
+                }
+                dup2(in, STDIN_FILENO);
+                close(in);
+            }
+            if (outputFile) {
+                int out = open(outputFile, O_WRONLY | O_CREAT | (appendOutput ? O_APPEND : O_TRUNC), 0644);
+
+                if (out < 0) {
+                    perror("Error opening output file");
+                    exit(1);
+                }
+                dup2(out, STDOUT_FILENO);
+                close(out);
+            }
+            if (errorFile) {
+                int err = open(errorFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (err < 0) {
+                    perror("Error opening error file");
+                    exit(1);
+                }
+                dup2(err, STDERR_FILENO);
+                close(err);
+            }
+
+            // Execute command
             searchPathAndExecute(args[0], args);
-        } else {
-            // Parent process
-            if (background == 1) {
+        } else { // Parent process
+            if (background) {
                 printf("[Background process started with PID %d]\n", pid);
                 add_background_process(pid);
             } else {
