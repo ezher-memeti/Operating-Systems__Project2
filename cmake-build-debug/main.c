@@ -151,7 +151,15 @@ void execute_history_command(int index, char *args[]) {
         fprintf(stderr, "Invalid history index.\n");
         return;
     }
-    char *command = history[(start + index) % HISTORY_SIZE];
+
+    // Retrieve the command from history
+    char command[MAX_LINE];
+    snprintf(command, MAX_LINE, "%s", history[(start + index) % HISTORY_SIZE]);
+
+    // Move the executed command to the top of the history
+    add_to_history(command);
+
+    // Print the command being executed
     printf("Executing: %s\n", command);
 
     // Parse the command into args
@@ -174,6 +182,7 @@ void execute_history_command(int index, char *args[]) {
         perror("Fork failed");
     }
 }
+
 
 pid_t foregroundPid = 0;
 
@@ -217,12 +226,25 @@ void move_to_foreground(int index) {
 }
 
 void handle_exit() {
+    // Check for background processes and wait for their termination
+    for (int i = 0; i < bgCount; i++) {
+        pid_t result = waitpid(bgProcesses[i], NULL, WNOHANG);
+        if (result > 0) {
+            // Process has terminated, remove from the list
+            remove_background_process(bgProcesses[i]);
+            i--; // Adjust index to recheck the shifted array
+        }
+    }
+
+    // If there are still active background processes, prevent exit
     if (bgCount > 0) {
-        printf("There are %d background processes running. Please terminate them first.\n", bgCount);
+        printf("There are %d background processes still running. Please terminate them first.\n", bgCount);
     } else {
-        exit(0);
+        printf("Exiting shell.\n");
+        exit(0); // Exit when all processes are cleaned up
     }
 }
+
 
 int main(void) {
     char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
