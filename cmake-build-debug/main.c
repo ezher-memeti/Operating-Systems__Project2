@@ -12,7 +12,6 @@
 
 pid_t bgProcesses[MAX_BG_PROCESSES];
 
-
 char history[HISTORY_SIZE][MAX_LINE]; // Store last 10 commands
 int historyCount = 0;
 
@@ -87,6 +86,8 @@ void setup(char inputBuffer[], char *args[],int *background)
     }    /* end of for */
     args[ct] = NULL; /* just in case the input line was > 80 */
 
+//    for (i = 0; i <= ct; i++)
+//        printf("args %d = %s\n",i,args[i]);
 } /* end of setup routine */
 
 void searchPathAndExecute(char *command, char *args[]) {
@@ -109,18 +110,33 @@ void searchPathAndExecute(char *command, char *args[]) {
 
 //HISTORY
 void add_to_history(const char *command) {
-    // Strip trailing newline if present
-    char sanitizedCommand[MAX_LINE];
-    strncpy(sanitizedCommand, command, MAX_LINE - 1);
-    sanitizedCommand[MAX_LINE - 1] = '\0'; // Ensure null termination
-    size_t len = strlen(sanitizedCommand);
-    if (len > 0 && sanitizedCommand[len - 1] == '\n') {
-        sanitizedCommand[len - 1] = '\0';
+    // Check if the command is already in history
+    int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
+    for (int i = start; i < historyCount; i++) {
+        if (strcmp(history[i % HISTORY_SIZE], command) == 0) {
+            // Remove the duplicate by shifting all commands after it
+            for (int j = i; j < historyCount - 1; j++) {
+                snprintf(history[j % HISTORY_SIZE], MAX_LINE, "%s", history[(j + 1) % HISTORY_SIZE]);
+            }
+            historyCount--; // Decrement history count to reflect removal
+            break;
+        }
     }
 
-    snprintf(history[historyCount % HISTORY_SIZE], MAX_LINE, "%s", sanitizedCommand);
-    historyCount++;
+    // Shift all commands in history to make space for the new command at index 0
+    for (int i = HISTORY_SIZE - 1; i > 0; i--) {
+        snprintf(history[i], MAX_LINE, "%s", history[i - 1]);
+    }
+
+    // Add the new command at index 0
+    snprintf(history[0], MAX_LINE, "%s", command);
+
+    // If historyCount is less than HISTORY_SIZE, increment it
+    if (historyCount < HISTORY_SIZE) {
+        historyCount++;
+    }
 }
+
 
 void print_history() {
     int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
@@ -207,74 +223,6 @@ void handle_exit() {
         exit(0);
     }
 }
-// Handle I/O redirection
-void handle_redirection(char *args[], int *redirect_in, int *redirect_out, int *append_out, char **input_file, char **output_file) {
-    for (int i = 0; args[i] != NULL; i++) {
-        if (strcmp(args[i], "<") == 0) {
-            *redirect_in = 1;
-            *input_file = args[i + 1];
-            args[i] = NULL;
-        } else if (strcmp(args[i], ">") == 0) {
-            *redirect_out = 1;
-            *append_out = 0;
-            *output_file = args[i + 1];
-            args[i] = NULL;
-        } else if (strcmp(args[i], ">>") == 0) {
-            *redirect_out = 1;
-            *append_out = 1;
-            *output_file = args[i + 1];
-            args[i] = NULL;
-        }
-    }
-}
-// Execute a command
-void execute_command(char *args[], int background) {
-    pid_t pid = fork();
-
-    if (pid < 0) {
-        perror("Fork failed");
-        return;
-    }
-
-    if (pid == 0) { // Child process
-        int redirect_in = 0, redirect_out = 0, append_out = 0;
-        char *input_file = NULL, *output_file = NULL;
-        handle_redirection(args, &redirect_in, &redirect_out, &append_out, &input_file, &output_file);
-
-        if (redirect_in) {
-            int fd = open(input_file, O_RDONLY);
-            if (fd < 0) {
-                perror("Error opening input file");
-                exit(1);
-            }
-            dup2(fd, STDIN_FILENO);
-            close(fd);
-        }
-
-        if (redirect_out) {
-            int fd = open(output_file, O_WRONLY | O_CREAT | (append_out ? O_APPEND : O_TRUNC), 0644);
-            if (fd < 0) {
-                perror("Error opening output file");
-                exit(1);
-            }
-            dup2(fd, STDOUT_FILENO);
-            close(fd);
-        }
-
-        execvp(args[0], args);
-        perror("Exec failed");
-        exit(1);
-    } else { // Parent process
-        if (background) {
-            add_background_process(pid);
-            printf("Background process started: %d\n", pid);
-        } else {
-            foregroundPid = pid;
-            waitpid(pid, NULL, 0);
-            foregroundPid = 0;
-        }
-    }
-}
 
 int main(void) {
     char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
@@ -283,20 +231,22 @@ int main(void) {
     signal(SIGTSTP, handle_sigint); // Handle ^Z
 
     while (1) {
-        printf("myshell: ");
         background = 0;
+        printf("myshell: ");
         fflush(stdout);
         setup(inputBuffer, args, &background);
 
         // Built-in commands
         if (args[0] == NULL) continue; // Ignore empty input
+
         // Handle "exit"
-        else if (strcmp(args[0], "exit") == 0) {
+        if (strcmp(args[0], "exit") == 0) {
             handle_exit();
             continue;
         }
+
         // Handle "history"
-        else if (strcmp(args[0], "history") == 0) {
+        if (strcmp(args[0], "history") == 0) {
             if (args[1] != NULL && strcmp(args[1], "-i") == 0 && args[2] != NULL) {
                 int index = atoi(args[2]);
                 execute_history_command(index, args);
@@ -305,8 +255,9 @@ int main(void) {
             }
             continue;
         }
+
         // Handle "fg %<num>"
-        else if (strcmp(args[0], "fg") == 0) {
+        if (strcmp(args[0], "fg") == 0) {
             if (args[1] != NULL && args[1][0] == '%') {
                 int index = atoi(&args[1][1]);
                 move_to_foreground(index);
@@ -314,9 +265,6 @@ int main(void) {
                 fprintf(stderr, "Usage: fg %%<num>\n");
             }
             continue;
-        }
-        else {
-            execute_command(args, background);
         }
 
         // Add the command to history
