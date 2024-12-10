@@ -212,16 +212,33 @@ void remove_background_process(pid_t pid) {
     }
 }
 
-void move_to_foreground(int index) {
-    if (index < 0 || index >= bgCount) {
-        fprintf(stderr, "Invalid background process index.\n");
+void move_to_foreground(pid_t pid) {
+    // Check if the PID exists in the background process list
+    int found = 0;
+    for (int i = 0; i < bgCount; i++) {
+        if (bgProcesses[i] == pid) {
+            found = 1;
+            // Remove the process from the background list
+            remove_background_process(pid);
+            break;
+        }
+    }
+
+    if (!found) {
+        fprintf(stderr, "Invalid process ID: %d. No such background process.\n", pid);
         return;
     }
-    pid_t pid = bgProcesses[index];
-    remove_background_process(pid);
+
+    // Bring the process to the foreground
     foregroundPid = pid;
     printf("Bringing process %d to foreground.\n", pid);
-    waitpid(pid, NULL, 0);
+
+    // Wait for the process to complete
+    if (waitpid(pid, NULL, 0) == -1) {
+        perror("Error while waiting for process");
+    }
+
+    // Reset the foreground PID
     foregroundPid = 0;
 }
 
@@ -281,10 +298,10 @@ int main(void) {
         // Handle "fg %<num>"
         if (strcmp(args[0], "fg") == 0) {
             if (args[1] != NULL && args[1][0] == '%') {
-                int index = atoi(&args[1][1]);
-                move_to_foreground(index);
+                pid_t pid = atoi(&args[1][1]);
+                move_to_foreground(pid);
             } else {
-                fprintf(stderr, "Usage: fg %%<num>\n");
+                fprintf(stderr, "Usage: fg %%<pid>\n");
             }
             continue;
         }
