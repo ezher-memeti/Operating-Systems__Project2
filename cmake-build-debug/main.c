@@ -113,7 +113,16 @@ void searchPathAndExecute(char *command, char *args[]) {
 
 //HISTORY
 void add_to_history(const char *command) {
-    snprintf(history[historyCount % HISTORY_SIZE], MAX_LINE, "%s", command);
+    // Strip trailing newline if present
+    char sanitizedCommand[MAX_LINE];
+    strncpy(sanitizedCommand, command, MAX_LINE - 1);
+    sanitizedCommand[MAX_LINE - 1] = '\0'; // Ensure null termination
+    size_t len = strlen(sanitizedCommand);
+    if (len > 0 && sanitizedCommand[len - 1] == '\n') {
+        sanitizedCommand[len - 1] = '\0';
+    }
+
+    snprintf(history[historyCount % HISTORY_SIZE], MAX_LINE, "%s", sanitizedCommand);
     historyCount++;
 }
 
@@ -132,19 +141,31 @@ void execute_history_command(int index, char *args[]) {
     }
     char *command = history[(start + index) % HISTORY_SIZE];
     printf("Executing: %s\n", command);
-    // Reparse and execute the command
-    setup(command, args, &(int){0});
+
+    // Parse the command into args
+    char *parsedArgs[MAX_LINE / 2 + 1]; // Parsed arguments
+    char *token = strtok(command, " ");
+    int argCount = 0;
+    while (token != NULL) {
+        parsedArgs[argCount++] = token;
+        token = strtok(NULL, " ");
+    }
+    parsedArgs[argCount] = NULL;
+
+    // Execute the parsed command
     pid_t pid = fork();
     if (pid == 0) {
-        searchPathAndExecute(args[0], args);
-    } else {
+        searchPathAndExecute(parsedArgs[0], parsedArgs);
+    } else if (pid > 0) {
         waitpid(pid, NULL, 0);
+    } else {
+        perror("Fork failed");
     }
 }
+
 pid_t foregroundPid = 0;
 
-
-
+///////
 void handle_sigint(int sig) {
     if (foregroundPid > 0) {
         kill(-foregroundPid, SIGTERM); // Send SIGTERM to process group
@@ -200,6 +221,7 @@ int main(void) {
     while (1) {
         background = 0;
         printf("myshell: ");
+        fflush(stdout);
         setup(inputBuffer, args, &background);
 
         // Built-in commands
