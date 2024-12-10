@@ -109,33 +109,18 @@ void searchPathAndExecute(char *command, char *args[]) {
 
 //HISTORY
 void add_to_history(const char *command) {
-    // Check if the command is already in history
-    int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
-    for (int i = start; i < historyCount; i++) {
-        if (strcmp(history[i % HISTORY_SIZE], command) == 0) {
-            // Remove the duplicate by shifting all commands after it
-            for (int j = i; j < historyCount - 1; j++) {
-                snprintf(history[j % HISTORY_SIZE], MAX_LINE, "%s", history[(j + 1) % HISTORY_SIZE]);
-            }
-            historyCount--; // Decrement history count to reflect removal
-            break;
-        }
+    // Strip trailing newline if present
+    char sanitizedCommand[MAX_LINE];
+    strncpy(sanitizedCommand, command, MAX_LINE - 1);
+    sanitizedCommand[MAX_LINE - 1] = '\0'; // Ensure null termination
+    size_t len = strlen(sanitizedCommand);
+    if (len > 0 && sanitizedCommand[len - 1] == '\n') {
+        sanitizedCommand[len - 1] = '\0';
     }
 
-    // Shift all commands in history to make space for the new command at index 0
-    for (int i = HISTORY_SIZE - 1; i > 0; i--) {
-        snprintf(history[i], MAX_LINE, "%s", history[i - 1]);
-    }
-
-    // Add the new command at index 0
-    snprintf(history[0], MAX_LINE, "%s", command);
-
-    // If historyCount is less than HISTORY_SIZE, increment it
-    if (historyCount < HISTORY_SIZE) {
-        historyCount++;
-    }
+    snprintf(history[historyCount % HISTORY_SIZE], MAX_LINE, "%s", sanitizedCommand);
+    historyCount++;
 }
-
 
 void print_history() {
     int start = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
