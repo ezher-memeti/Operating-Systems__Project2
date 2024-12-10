@@ -3,9 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <signal.h>
 
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
@@ -89,8 +86,8 @@ void setup(char inputBuffer[], char *args[],int *background)
     }    /* end of for */
     args[ct] = NULL; /* just in case the input line was > 80 */
 
-    for (i = 0; i <= ct; i++)
-        printf("args %d = %s\n",i,args[i]);
+//    for (i = 0; i <= ct; i++)
+//        printf("args %d = %s\n",i,args[i]);
 } /* end of setup routine */
 
 void searchPathAndExecute(char *command, char *args[]) {
