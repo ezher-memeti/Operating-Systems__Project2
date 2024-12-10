@@ -11,6 +11,9 @@
 #define MAX_LINE 80 /* 80 chars per line, per command, should be enough. */
 #include <string.h>
 #define HISTORY_SIZE 10
+#define MAX_BG_PROCESSES 10
+
+pid_t bgProcesses[MAX_BG_PROCESSES];
 
 char history[HISTORY_SIZE][MAX_LINE]; // Store last 10 commands
 int historyCount = 0;
@@ -138,35 +141,117 @@ void execute_history_command(int index, char *args[]) {
         waitpid(pid, NULL, 0);
     }
 }
+pid_t foregroundPid = 0;
+
+
+
+void handle_sigint(int sig) {
+    if (foregroundPid > 0) {
+        kill(-foregroundPid, SIGTERM); // Send SIGTERM to process group
+        printf("Foreground process %d terminated.\n", foregroundPid);
+        foregroundPid = 0;
+    }
+}
+
+int bgCount = 0;
+
+void add_background_process(pid_t pid) {
+    if (bgCount < MAX_BG_PROCESSES) {
+        bgProcesses[bgCount++] = pid;
+    }
+}
+
+void remove_background_process(pid_t pid) {
+    for (int i = 0; i < bgCount; i++) {
+        if (bgProcesses[i] == pid) {
+            bgProcesses[i] = bgProcesses[--bgCount]; // Replace with last
+            break;
+        }
+    }
+}
+
+void move_to_foreground(int index) {
+    if (index < 0 || index >= bgCount) {
+        fprintf(stderr, "Invalid background process index.\n");
+        return;
+    }
+    pid_t pid = bgProcesses[index];
+    remove_background_process(pid);
+    foregroundPid = pid;
+    printf("Bringing process %d to foreground.\n", pid);
+    waitpid(pid, NULL, 0);
+    foregroundPid = 0;
+}
+
+void handle_exit() {
+    if (bgCount > 0) {
+        printf("There are %d background processes running. Please terminate them first.\n", bgCount);
+    } else {
+        exit(0);
+    }
+}
 
 int main(void) {
     char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
     int background;             /* equals 1 if a command is followed by '&' */
     char *args[MAX_LINE / 2 + 1]; /* command line arguments */
+    signal(SIGTSTP, handle_sigint); // Handle ^Z
 
     while (1) {
         background = 0;
         printf("myshell: ");
-        fflush(stdout);
-        setup(inputBuffer, args, &background); /* Parse input */
+        setup(inputBuffer, args, &background);
 
-        if (args[0] == NULL) { // Empty command
+        // Built-in commands
+        if (args[0] == NULL) continue; // Ignore empty input
+
+        // Handle "exit"
+        if (strcmp(args[0], "exit") == 0) {
+            handle_exit();
             continue;
         }
 
-        pid_t pid = fork(); // Create a new process
-        if (pid < 0) {
-            perror("fork failed");
-            continue;
-        }
-
-        if (pid == 0) { // Child process
-            searchPathAndExecute(args[0], args);
-        } else { // Parent process
-            if (background == 0) {
-                waitpid(pid, NULL, 0); // Wait for the foreground process to finish
+        // Handle "history"
+        if (strcmp(args[0], "history") == 0) {
+            if (args[1] != NULL && strcmp(args[1], "-i") == 0 && args[2] != NULL) {
+                int index = atoi(args[2]);
+                execute_history_command(index, args);
             } else {
+                print_history();
+            }
+            continue;
+        }
+
+        // Handle "fg %<num>"
+        if (strcmp(args[0], "fg") == 0) {
+            if (args[1] != NULL && args[1][0] == '%') {
+                int index = atoi(&args[1][1]);
+                move_to_foreground(index);
+            } else {
+                fprintf(stderr, "Usage: fg %%<num>\n");
+            }
+            continue;
+        }
+
+        // Add the command to history
+        add_to_history(inputBuffer);
+
+        // Process command execution
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("Failed to fork");
+        } else if (pid == 0) {
+            // Child process: execute command
+            searchPathAndExecute(args[0], args);
+        } else {
+            // Parent process
+            if (background == 1) {
                 printf("[Background process started with PID %d]\n", pid);
+                add_background_process(pid);
+            } else {
+                foregroundPid = pid;
+                waitpid(pid, NULL, 0);
+                foregroundPid = 0;
             }
         }
     }
